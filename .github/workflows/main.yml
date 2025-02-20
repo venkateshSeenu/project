@@ -1,0 +1,43 @@
+name: CI/CD for Valpo Velvet
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🚀 Checkout Code
+        uses: actions/checkout@v2
+
+      - name: 🏗 Deploy Backend
+        uses: appleboy/ssh-action@v0.1.4
+        with:
+          host: ${{ secrets.AWS_EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
+          script: |
+            cd /home/ubuntu/valpovelvet-backend
+            git pull origin main
+            docker build -t valpo-backend .
+            docker stop valpo-backend || true
+            docker rm valpo-backend || true
+            docker run -d -p 5000:5000 --name valpo-backend valpo-backend
+            sudo systemctl restart nginx
+
+      - name: 🌐 Deploy Frontend
+        uses: appleboy/ssh-action@v0.1.4
+        with:
+          host: ${{ secrets.AWS_EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
+          script: |
+            cd /home/ubuntu/valpovelvet-frontend
+            git pull origin main
+            npm install
+            npm run build
+            sudo cp -r build/* /var/www/html/
+            sudo systemctl restart nginx
