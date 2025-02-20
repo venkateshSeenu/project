@@ -10,10 +10,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 🚀 Checkout Code
+      - name: Checkout Code
         uses: actions/checkout@v2
 
-      - name: 🏗 Deploy Backend
+      - name: Deploy Backend
         uses: appleboy/ssh-action@v0.1.4
         with:
           host: ${{ secrets.AWS_EC2_HOST }}
@@ -28,7 +28,7 @@ jobs:
             docker run -d -p 5000:5000 --name valpo-backend valpo-backend
             sudo systemctl restart nginx
 
-      - name: 🌐 Deploy Frontend
+      - name: Deploy Frontend
         uses: appleboy/ssh-action@v0.1.4
         with:
           host: ${{ secrets.AWS_EC2_HOST }}
