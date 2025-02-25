@@ -1,4 +1,4 @@
-name: CI/CD for Valpo Velvet
+name: Deploy Full Stack App
 
 on:
   push:
@@ -6,38 +6,70 @@ on:
       - main
 
 jobs:
-  deploy:
+  backend:
+    name: Deploy Backend to Cloud Run
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      - name: Deploy Backend
-        uses: appleboy/ssh-action@v0.1.4
+      - name: Authenticate with GCP
+        uses: google-github-actions/auth@v1
         with:
-          host: ${{ secrets.AWS_EC2_HOST }}
-          username: ubuntu
-          key: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
-          script: |
-            cd /home/ubuntu/backend
-            git pull origin main
-            docker build -t valpo-backend .
-            docker stop valpo-backend || true
-            docker rm valpo-backend || true
-            docker run -d -p 5000:5000 --name valpo-backend valpo-backend
-            sudo systemctl restart nginx
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Deploy Frontend
-        uses: appleboy/ssh-action@v0.1.4
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
         with:
-          host: ${{ secrets.AWS_EC2_HOST }}
-          username: ubuntu
-          key: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
-          script: |
-            cd /home/ubuntu/frontend
-            git pull origin main
-            npm install
-            npm run build
-            sudo cp -r build/* /var/www/html/
-            sudo systemctl restart nginx
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker
+
+      - name: Build and Push Docker Image to GCR
+        run: |
+          docker build -t gcr.io/${{ secrets.GCP_PROJECT_ID }}/fastapi-backend .
+          docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/fastapi-backend
+
+      - name: Deploy Backend to Cloud Run
+        run: |
+          gcloud run deploy ${{ secrets.BACKEND_SERVICE_NAME }} \
+          --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/fastapi-backend \
+          --platform managed \
+          --region us-central1 \
+          --allow-unauthenticated \
+          --set-env-vars MONGO_URI=${{ secrets.MONGO_URI }}
+
+  frontend:
+    name: Deploy Frontend to GCS
+    runs-on: ubuntu-latest
+    needs: backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with GCP
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: frontend
+
+      - name: Build Frontend
+        run: npm run build
+        working-directory: frontend
+
+      - name: Sync Build to GCS
+        run: |
+          gsutil -m rsync -r frontend/out gs://$FRONTEND_BUCKET_NAME
+
+      - name: Set Public Access
+        run: |
+          gsutil iam ch allUsers:objectViewer gs://$FRONTEND_BUCKET_NAME
